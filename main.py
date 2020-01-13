@@ -2,7 +2,7 @@
 # vim:fileencoding=utf-8
 
 import os
-import sys
+import asyncio
 topdir = os.path.dirname(os.path.abspath(__file__))
 
 # tmpl_dir = os.path.join(topdir, 'tmpl')
@@ -12,7 +12,13 @@ import tornado.web
 from tornado.options import define, options
 from tornado.httpserver import HTTPServer
 
-from morerss import *
+from morerss import (
+  ZhihuZhuanlanHandler,
+  ZhihuStream,
+  StaticZhihuHandler,
+  V2exCommentHandler,
+)
+from morerss.base import MyApp
 
 routers = [
   # (r'/static/(.*)', tornado.web.StaticFileHandler, {'path': static_dir}),
@@ -28,7 +34,7 @@ def main():
   define("debug", default=False, help="debug mode", type=bool)
 
   tornado.options.parse_command_line()
-  application = tornado.web.Application(
+  application = MyApp(
     routers,
     gzip = True,
     debug = options.debug,
@@ -37,6 +43,9 @@ def main():
   )
   http_server = HTTPServer(application, xheaders=True)
   http_server.listen(options.port, address=options.address)
+
+  from morerss.zhihu import _article_fetcher
+  asyncio.ensure_future(_article_fetcher())
   tornado.ioloop.IOLoop.instance().start()
 
 if __name__ == "__main__":

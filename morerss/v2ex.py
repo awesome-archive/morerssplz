@@ -1,7 +1,7 @@
 from functools import partial
 
 import PyRSS2Gen
-from tornado import gen, web
+from tornado import web
 from tornado.httpclient import AsyncHTTPClient
 from lxml.html import fromstring, tostring
 
@@ -11,20 +11,23 @@ from . import base
 httpclient = AsyncHTTPClient()
 
 class V2exCommentHandler(BaseHandler):
-  @gen.coroutine
-  def get(self, tid):
+  async def get(self, tid):
     url = 'https://www.v2ex.com/t/' + tid
-    webpage = yield self._get_url(url)
-    data = parse_webpage(webpage, baseurl=url)
+    webpage = await self._get_url(url)
 
-    if len(data['comments']) < 40 and data['prev']:
-      webpage = yield self._get_url(data['prev'])
-      data2 = parse_webpage(webpage, baseurl=data['prev'])
-      comments = data['comments'] + data2['comments']
-      if len(comments) > 40:
-        comments = comments[:40]
-    else:
-      comments = data['comments']
+    try:
+      data = parse_webpage(webpage, baseurl=url)
+
+      if len(data['comments']) < 40 and data['prev']:
+        webpage = await self._get_url(data['prev'])
+        data2 = parse_webpage(webpage, baseurl=data['prev'])
+        comments = data['comments'] + data2['comments']
+        if len(comments) > 40:
+          comments = comments[:40]
+      else:
+        comments = data['comments']
+    except PermissionError:
+      raise web.HTTPError(403, 'login required')
 
     rss_info = {
       'title': '[评论] %s' % data['subject'],
@@ -40,9 +43,8 @@ class V2exCommentHandler(BaseHandler):
     xml = rss.to_xml(encoding='utf-8')
     self.finish(xml)
 
-  @gen.coroutine
-  def _get_url(self, url):
-    res = yield httpclient.fetch(url, raise_error=False)
+  async def _get_url(self, url):
+    res = await httpclient.fetch(url, raise_error=False)
     if res.code in [404, 429]:
       raise web.HTTPError(res.code)
     else:
@@ -65,6 +67,7 @@ def comment2rss(url, comment):
   item = PyRSS2Gen.RSSItem(
     title = title,
     link = url,
+    guid = url,
     description = content,
     author = author,
   )
@@ -74,6 +77,9 @@ def parse_webpage(body, baseurl):
   doc = fromstring(body, base_url=baseurl)
   doc.make_links_absolute()
   subject = doc.xpath('//title')[0].text_content()
+  if subject == 'V2EX › 登录':
+    raise PermissionError
+
   description = doc.xpath('//meta[@property="og:description"]')[0] \
       .get('content')
   comments = doc.xpath('//div[@id="Main"]/div[@class="box"]/div[@id]')

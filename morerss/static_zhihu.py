@@ -1,14 +1,7 @@
-import json
-import re
+import logging
 
-from tornado.httpclient import AsyncHTTPClient
-from lxml.html import fromstring, tostring
-
-from . import base
 from .base import BaseHandler
-from .zhihu_stream import tidy_content, re_zhihu_img
-
-httpclient = AsyncHTTPClient()
+from .zhihulib import fetch_article
 
 page_template = '''\
 <!DOCTYPE html>
@@ -25,36 +18,17 @@ body {{ max-width: 700px; margin: auto; }}
 <footer><a href="https://zhuanlan.zhihu.com/p/{id}">原文链接</a></footer>
 '''
 
+logger = logging.getLogger(__name__)
+
 class StaticZhihuHandler(BaseHandler):
   async def get(self, id):
     pic = self.get_argument('pic', None)
-    page = await self._get_url(f'https://zhuanlan.zhihu.com/p/{id}')
-    for l in page.splitlines():
-      if l.lstrip().startswith('<textarea id="preloadedState" hidden>'):
-        content = l.split('>', 1)[-1].rsplit('<', 1)[0]
-        content = json.loads(content)
-        break
+    article = await fetch_article(id, pic)
 
-    post = content['database']['Post'][id]
-    title = post['title']
-    author = post['author']
-    body = post['content']
-    author = content['database']['User'][author]['name']
+    # used by vars()
+    title = article['title']
+    author = article['author']['name']
+    body = article['content']
 
-    doc = fromstring(body)
-    body = tidy_content(doc)
-
-    if pic:
-      base.proxify_pic(doc, re_zhihu_img, pic)
-
-    body = tostring(doc, encoding=str)
     self.set_header('Content-Type', 'text/html; charset=utf-8')
     self.finish(page_template.format_map(vars()))
-
-  async def _get_url(self, url):
-    res = await httpclient.fetch(url, raise_error=False)
-    if res.code in [404, 429]:
-      raise web.HTTPError(res.code)
-    else:
-      res.rethrow()
-    return res.body.decode('utf-8')
